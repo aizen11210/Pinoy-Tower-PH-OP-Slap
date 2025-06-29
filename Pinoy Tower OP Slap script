@@ -1,0 +1,196 @@
+-- 🌟 Enhanced Long-Range Auto-Slap Script with Sound, GUI Toggle, and Smart Features
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- ⚙️ Settings
+local SLAP_RANGE = 100
+local SLAP_DELAY = 1
+local SLAP_FOV = 60 -- degrees
+local RAYCAST_CHECK = true
+local HIT_VOLUME = 0
+local SOUND_IDS = {
+	"rbxassetid://142376088", -- funny slap
+	"rbxassetid://9118823102", -- bonk
+	"rbxassetid://9071112892", -- punch
+	"rbxassetid://546114049",  -- pop
+}
+
+-- 🔘 GUI Toggle
+local GuiEnabled = false
+local GuiElements = {
+	CooldownText = nil,
+	TargetInfo = nil
+}
+
+local function createToggleGui()
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "AutoSlapToggleGui"
+	screenGui.ResetOnSpawn = false
+	screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(0, 140, 0, 35)
+	button.Position = UDim2.new(0, 10, 0, 10)
+	button.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	button.TextColor3 = Color3.new(1, 1, 1)
+	button.Text = "Auto-Slap: OFF"
+	button.Font = Enum.Font.SourceSansBold
+	button.TextSize = 18
+	button.Parent = screenGui
+
+	button.MouseButton1Click:Connect(function()
+		GuiEnabled = not GuiEnabled
+		button.Text = GuiEnabled and "Auto-Slap: ON" or "Auto-Slap: OFF"
+		button.BackgroundColor3 = GuiEnabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(30, 30, 30)
+	end)
+
+	-- Cooldown label
+	local cooldown = Instance.new("TextLabel")
+	cooldown.Size = UDim2.new(0, 180, 0, 25)
+	cooldown.Position = UDim2.new(0, 10, 0, 50)
+	cooldown.BackgroundTransparency = 1
+	cooldown.TextColor3 = Color3.new(1, 1, 1)
+	cooldown.Font = Enum.Font.SourceSans
+	cooldown.TextSize = 16
+	cooldown.Text = "Next slap in: 0s"
+	cooldown.Parent = screenGui
+	GuiElements.CooldownText = cooldown
+
+	-- Target info
+	local info = Instance.new("TextLabel")
+	info.Size = UDim2.new(0, 180, 0, 25)
+	info.Position = UDim2.new(0, 10, 0, 75)
+	info.BackgroundTransparency = 1
+	info.TextColor3 = Color3.new(1, 1, 0.5)
+	info.Font = Enum.Font.SourceSans
+	info.TextSize = 16
+	info.Text = "Target: None"
+	info.Parent = screenGui
+	GuiElements.TargetInfo = info
+end
+
+-- 🔊 Play random hit sound
+local function playHitSound()
+	local character = LocalPlayer.Character
+	if not character then return end
+	local sound = Instance.new("Sound")
+	sound.SoundId = SOUND_IDS[math.random(1, #SOUND_IDS)]
+	sound.Volume = HIT_VOLUME
+	sound.Parent = character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart") or character
+	sound:Play()
+	sound.Ended:Connect(function()
+		sound:Destroy()
+	end)
+end
+
+-- 🔎 Get Event
+local function getSlapEvent()
+	local char = LocalPlayer.Character
+	if not char then return nil end
+	local tool = char:FindFirstChild("Win Hanger")
+	if tool and tool:FindFirstChild("Event") then
+		return tool.Event
+	end
+	return nil
+end
+
+-- Raycast visibility
+local function isVisible(fromPos, toPos)
+	if not RAYCAST_CHECK then return true end
+	local result = Workspace:Raycast(fromPos, toPos - fromPos, RaycastParams.new())
+	return not result or not result.Instance or result.Instance:IsDescendantOf(LocalPlayer.Character)
+end
+
+-- 🔍 Targeting
+local function getNearestTarget()
+	local char = LocalPlayer.Character
+	if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
+
+	local root = char.HumanoidRootPart
+	local closestPlayer = nil
+	local closestDist = SLAP_RANGE
+	local forward = root.CFrame.LookVector
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			local targetRoot = player.Character.HumanoidRootPart
+			local dirToTarget = (targetRoot.Position - root.Position)
+			local distance = dirToTarget.Magnitude
+
+			if distance <= SLAP_RANGE then
+				local angle = math.deg(math.acos(dirToTarget.Unit:Dot(forward)))
+				if angle <= SLAP_FOV / 2 and isVisible(root.Position, targetRoot.Position) then
+					if distance < closestDist then
+						closestDist = distance
+						closestPlayer = player
+					end
+				end
+			end
+		end
+	end
+
+	return closestPlayer, closestDist
+end
+
+-- 🖐️ Slap action
+local function slapTarget(targetPlayer)
+	local char = LocalPlayer.Character
+	if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+	if not targetPlayer or not targetPlayer.Character then return end
+
+	local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if not targetRoot then return end
+
+	local event = getSlapEvent()
+	if not event then return end
+
+	local direction = (targetRoot.Position - char.HumanoidRootPart.Position).Unit
+	local slapPos = char.HumanoidRootPart.Position + direction * SLAP_RANGE
+
+	event:FireServer("slash", targetPlayer.Character, slapPos)
+	playHitSound()
+end
+
+-- 🔁 Loop
+local lastSlap = 0
+RunService.Heartbeat:Connect(function()
+	if GuiElements.CooldownText then
+		local remaining = math.max(0, SLAP_DELAY - (tick() - lastSlap))
+		GuiElements.CooldownText.Text = string.format("Next slap in: %.1fs", remaining)
+	end
+
+	if GuiEnabled and tick() - lastSlap >= SLAP_DELAY then
+		local target, distance = getNearestTarget()
+		if target then
+			if GuiElements.TargetInfo then
+				GuiElements.TargetInfo.Text = string.format("Target: %s (%.1f studs)", target.Name, distance)
+			end
+			pcall(function()
+				slapTarget(target)
+			end)
+			lastSlap = tick()
+		else
+			if GuiElements.TargetInfo then
+				GuiElements.TargetInfo.Text = "Target: None"
+			end
+		end
+	end
+end)
+
+-- ⌨️ Keybind toggle (T)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if not gameProcessed and input.KeyCode == Enum.KeyCode.T then
+		GuiEnabled = not GuiEnabled
+		if GuiElements and GuiElements.CooldownText then
+			GuiElements.CooldownText.Text = GuiEnabled and "Auto-Slap: ON" or "Auto-Slap: OFF"
+		end
+	end
+end)
+
+-- ✅ Init GUI
+createToggleGui()
